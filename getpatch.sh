@@ -2,8 +2,8 @@
 
 # first argument is a kernel version, script takes sublevel and calculates the nearest patch to the provided SUBLEVEL
 # Kernel version 5.4.174, SUBLEVEL number is 174
-major_minor=5.4
-sublevel=174
+major_minor=6.8
+sublevel=2
 if [ $# -ne 0 ]; then
        major_minor=`echo $1 | cut -d '.' -f 1-2`
        sublevel=`echo $1 | cut -d '.' -f 3`

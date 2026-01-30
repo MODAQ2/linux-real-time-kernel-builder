@@ -1,188 +1,156 @@
-# Build ```RT_PREEMPT``` kernel for Raspberry Pi
+# Build `RT_PREEMPT` kernel for Raspberry Pi
 
 [![RPI RT Kernel build](https://github.com/ros-realtime/linux-real-time-kernel-builder/actions/workflows/rpi4-kernel-build.yml/badge.svg)](https://github.com/ros-realtime/linux-real-time-kernel-builder/actions/workflows/rpi4-kernel-build.yml)
 
 ## Introduction
 
-This README describes necessary steps to build and install ```RT_PREEMPT``` Linux kernel for the Raspberry Pi board. RT Kernel is a part of the ROS2 real-time system setup. Raspberry Pi is a reference board used by the ROS 2 real-time community for the development. RT Kernel is configured as described in [Kernel configuration section](#kernel-configuration). Kernel is built automatically by the Github action, and the artifacts are located under the [```build stable```](https://github.com/ros-realtime/linux-real-time-kernel-builder/actions/workflows/build-stable.yaml). Please follow [installation instructions](#deploy-new-kernel-on-raspberry-pi) to deploy a new kernel to the RPI board.
+This README describes necessary steps to build and install `RT_PREEMPT` Linux kernel for the Raspberry Pi board. RT Kernel is a part of the ROS2 real-time system setup.
 
-## Raspberry Pi RT Linux kernel
+## Quick Start
 
-Ubuntu ```raspi``` kernel is modified to produce an RT Linux kernel. Ubuntu is a ROS 2 Tier 1 platform and Ubuntu kernel was selected to align to it. It is possible to build the raspi kernel for Ubuntu LTS release 24.04.
-
-## Download ready-to-use RT Kernel ```deb``` packages
-
-RT Kernel is configured using configuration parameters from the [](.config-fragment) file. In the case you need to build your own kernel read the description below.
-
-### Using GUI
-
-Go to the ```Action``` tab, find the ```Build stable```, go inside the latest workflow run, download, and unzip artifacts called ```RPI4 RT Kernel deb packages```. This archive contains three debian packages. Follow [instructions](#deploy-new-kernel-on-raspberry-pi) to deploy them on the RPI.
-
-### Using command line
-
-Go to the [```Developer settings```](https://github.com/settings/tokens) and generate a token to access the repo via Github API. Use this token in conjunction with your Github name to retrieve build artifacts.
-
-```bash
-$ token=<my_token>
-# rertieve all artifacts
-$ curl -i -u <my github name>:$token -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/ros-realtime/linux-real-time-kernel-builder/actions/artifacts | grep archive_download_url
-      "archive_download_url": "https://api.github.com/repos/ros-realtime/linux-real-time-kernel-builder/actions/artifacts/91829081/zip",
-      "archive_download_url": "https://api.github.com/repos/ros-realtime/linux-real-time-kernel-builder/actions/artifacts/91534731/zip",
-
-# download the latest one
-$ curl -u <my github name>:$token -L -H "Accept: application/vnd.github.v3+json"  https://api.github.com/repos/ros-realtime/linux-real-time-kernel-builder/actions/artifacts/91829081/zip  --output rpi4_rt_kernel.zip
-
-$ unzip rpi4_rt_kernel.zip
-```
-
-## Raspberry Pi RT Linux kernel build
-
-Ubuntu 24.04 ```x86_64``` based ```Dockerfile``` is developed to cross-compile a new kernel.
-
-### Build environment
-
-Docker container comes with cross-compilation tools installed, and a ready-to-build RT Linux kernel:
-
-* ARMv8 cross-compilation tools
-* Linux source build dependencies
-* Linux source ```buildinfo```, from where kernel config is copied
-* Ubuntu ```raspi``` Linux source installed under ```~/linux_build```
-* RT kernel patch downloaded and applied - the nearest to the recent ```raspi``` Ubuntu kernel
-
-It finds the latest ```raspi``` ```linux-image``` and the closest to it RT patch. If the build arguments specified it will build a corresponding kernel version instead.
-
-### Build and run docker container
-
-For the local build:
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/ros-realtime/linux-real-time-kernel-builder
 cd linux-real-time-kernel-builder
 ```
 
+### 2. Download all required files locally
+
 ```bash
-docker build [--no-cache] [--build-arg UBUNTU_VERSION=<ubuntu name>] [--build-arg KERNEL_VERSION=<kernel version>] [--build-arg UNAME_R=<raspi release>] [--build-arg RT_PATCH=<RT patch>] [--build-arg LTTNG_VERSION=<LTTNG version>] -t rtwg-image .
+./download.sh
 ```
 
-where:
+This script will:
+- Find the latest raspi kernel release for your specified version
+- Download the kernel buildinfo package (contains the kernel config)
+- Download the appropriate RT patch
+- Clone the kernel source from Launchpad
 
-* ```<ubuntu name>``` is `noble`, default is `noble`
-* ```<kernel version>``` is `6.8.0`, default is `6.8.0`
-* ```<raspi release>``` is in a form of `6.8.0-1005-raspi`,  see [Ubuntu raspi Linux kernels](http://ports.ubuntu.com/pool/main/l/linux-raspi)
-* ```<RT patch>``` is in a form of `6.8.2-rt11`, see [RT patches](https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.8/)
-* ```<LTTNG version>``` is `2.13`, default is `2.13`
-
+Optional: Specify kernel version and RT patch:
 ```bash
-docker run -t -i rtwg-image bash
+./download.sh 6.8.0 6.8.2-rt11
 ```
 
-### Kernel configuration
-
-There is a separate kernel configuration fragment```.config-fragment``` introduced to apply ROS2 real-time specific kernel settings. Below is an example:
+### 3. Build the Docker image
 
 ```bash
-$ cat .config-fragment
-CONFIG_PREEMPT_RT=y
-CONFIG_NO_HZ_FULL=y
-CONFIG_HZ_1000=y
-# CONFIG_AUFS_FS is not set
+docker build -t rtwg-image .
 ```
 
-If you need to reconfigure it, run
+### 4. Run the container and build the kernel
 
 ```bash
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- menuconfig
+docker run -it rtwg-image bash
 ```
 
-Alternatively, you can modify ```.config-fragment``` and then merge your changes in the ```.config``` by running
-
+Inside the container:
 ```bash
-cd $HOME/linux_build/linux-raspi
-ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- ./scripts/kconfig/merge_config.sh .config $HOME/linux_build/.config-fragment
+cd /linux_build/linux-raspi
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=-raspi -j $(nproc) bindeb-pkg
 ```
 
-### Kernel build
+### 5. Copy the .deb packages
 
+The build produces `.deb` packages in `/linux_build/`:
 ```bash
-cd $HOME/linux_build/linux-raspi
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=-raspi -j `nproc` bindeb-pkg
+ls -la /linux_build/*.deb
 ```
 
-You need 16GB free disk space to build it, it takes a while, and the results are located:
-
+Copy them to your host:
 ```bash
-raspi:~/linux_build/linux-raspi $ ls -la ../*.deb
--rw-r--r-- 1 user user   9355162 Jul  1 16:44 ../linux-headers-6.8.4-rt11-raspi_6.8.4-g75867ff0890f-4_arm64.deb
--rw-r--r-- 1 user user  70457678 Jul  1 16:44 ../linux-image-6.8.4-rt11-raspi_6.8.4-g75867ff0890f-4_arm64.deb
--rw-r--r-- 1 user user   1377154 Jul  1 16:44 ../linux-libc-dev_6.8.4-g75867ff0890f-4_arm64.deb
+# From another terminal on the host
+docker cp <container_id>:/linux_build/*.deb .
 ```
 
-## Deploy new kernel on Raspberry Pi
-
-### Download and install Ubuntu 24.04 server image
-
-Follow these links to download and install Ubuntu 24.04 on your Raspberry Pi
-
-* [Install Ubuntu on a Raspberry Pi](https://ubuntu.com/download/raspberry-pi)
-* [Download Ubuntu Raspberry Pi server image](https://ubuntu.com/download/raspberry-pi/thank-you?version=24.04&architecture=server-arm64+raspi)
-* [Create an Ubuntu image for a Raspberry Pi on Ubuntu](https://ubuntu.com/tutorials/create-an-ubuntu-image-for-a-raspberry-pi-on-ubuntu#2-on-your-ubuntu-machine)
-
+Or directly to your Raspberry Pi:
 ```bash
-# initial username and password
-ubuntu/ubuntu
+scp /linux_build/*.deb user@<raspberry_pi_ip>:/home/user/
 ```
 
-### Update your system
+## Files Structure
 
-After that you need to connect to the Internet and update your system
-
-```bash
-$ sudo apt-get update && apt-get upgrade
+```
+linux-real-time-kernel-builder/
+├── download.sh          # Downloads kernel source, RT patch, and config locally
+├── Dockerfile           # Docker build configuration
+├── .config-fragment     # RT kernel configuration options
+├── getpatch.sh          # Helper script to find matching RT patches
+└── downloads/           # Created by download.sh
+    ├── linux-raspi/     # Kernel source
+    ├── patch-*.patch    # RT patch
+    ├── config-*         # Kernel config
+    ├── uname_r          # Kernel release version
+    └── rt_patch         # RT patch version
 ```
 
-### Install Ubuntu Desktop (optional)
+## Kernel Configuration
 
-Optionally you can install a desktop version
+The RT kernel is configured with options from `.config-fragment`:
 
+- `CONFIG_PREEMPT_RT=y` - Full RT preemption
+- `CONFIG_NO_HZ_FULL=y` - Full tickless operation
+- `CONFIG_HZ_1000=y` - 1000Hz timer frequency
+- `CONFIG_HIGH_RES_TIMERS=y` - High resolution timers
+- `CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y` - Performance CPU governor
+
+## Deploy New Kernel on Raspberry Pi
+
+1. Copy the `.deb` packages to your Raspberry Pi
+
+2. Install the packages:
 ```bash
-$ sudo apt-get update && apt-get upgrade && apt-get install ubuntu-desktop
+sudo dpkg -i linux-image-*.deb linux-headers-*.deb
 ```
 
-### Copy a new kernel to your system and install it
-
-Assumed you have already copied all ```*.deb``` kernel packages to your ```$HOME``` directory
-
+3. Reboot:
 ```bash
-cd $HOME
-sudo dpkg -i linux-image-*.deb
-
 sudo reboot
 ```
 
-After reboot you should see a new RT kernel installed and real-time enabled
-
+4. Verify the RT kernel is running:
 ```bash
-ubuntu@ubuntu:~$ uname -a
-Linux ubuntu 6.8.4-rt11-raspi #1 SMP PREEMPT_RT Mon Jul 1 14:10:16 UTC 2024 aarch64 aarch64 aarch64 GNU/Linux
-
-ubuntu@ubuntu:~$ cat /sys/kernel/realtime
-1
+uname -a
+# Should show PREEMPT_RT in the output
 ```
 
-## Intel UP2 board RT kernel build
+## Troubleshooting
 
-To build ```x86_64``` Linux kernel, see [Building Realtime rt_preempt kernel for ROS 2](https://docs.ros.org/en/rolling/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)
+### Download script fails to clone kernel source
 
-## Why is LTTng included in the kernel?
+The Launchpad git server can be unreliable. The script will retry 3 times automatically. If it still fails:
 
-[LTTng](https://lttng.org/docs) stands for _Linux Trace Toolkit: next generation_ and is an open source toolkit that enables low-level kernel tracing which can be extremely useful when calculating callback times, memory usage and many other key characteristics.
+1. Try again later
+2. Use a VPN or different network
+3. Clone manually:
+```bash
+git clone --filter=blob:none -b master --single-branch \
+    https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux-raspi/+git/noble \
+    downloads/linux-raspi
+```
 
-As this repository is within the `ros-realtime` organization it can be assumed that most users will install ROS 2 on the end system - which then they can use `ros2_tracing` to trace various things. Since [`ros2_tracing`](https://gitlab.com/ros-tracing/ros2_tracing) uses LTTng as its tracer, and since [the `lttng-modules` package is not easily available](https://github.com/ros-realtime/linux-real-time-kernel-builder/issues/16) for the raspberry-pi RT linux kernel we build it into the kernel here as a work around.
+### Build fails with RT patch errors
 
-## References
+The RT patch version must be close to the kernel version. If you see patch failures:
 
-* [ROS Real-Time Working group documentation](https://ros-realtime.github.io/Guides/Real-Time-Operating-System-Setup/Real-Time-Linux/rt_linux_index.html)
-* [Ubuntu raspi linux images](http://ports.ubuntu.com/pool/main/l/linux-raspi)
-* [RT patches](https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.8/)
-* [Download Ubuntu raspi server image](https://ubuntu.com/download/raspberry-pi/thank-you?version=24.04&architecture=server-arm64+raspi)
-* [Building Realtime ```RT_PREEMPT``` kernel for ROS 2](https://docs.ros.org/en/rolling/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)
+1. Check available RT patches at https://cdn.kernel.org/pub/linux/kernel/projects/rt/
+2. Specify a compatible RT patch version:
+```bash
+./download.sh 6.8.0 6.8.2-rt11
+```
+
+### Docker build fails
+
+Make sure you've run `./download.sh` first and all files exist in `downloads/`.
+
+## Download Ready-to-Use RT Kernel
+
+Pre-built RT kernel packages are available from GitHub Actions:
+
+1. Go to the `Actions` tab
+2. Find `Build stable` workflow
+3. Download the artifacts from the latest successful run
+
+## License
+
+See [LICENSE](LICENSE) file.
