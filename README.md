@@ -41,8 +41,9 @@ docker build -t rtwg-image .
 ### 4. Run the container and build the kernel
 
 ```bash
-docker run -it rtwg-image bash
+sudo docker run -it -v "$PWD/linux_build":/linux_build rtwg-image bash
 ```
+
 
 Inside the container:
 ```bash
